@@ -102,14 +102,25 @@ func (e *Engine) Handle(pkt *nfqueue.Packet) nfqueue.Verdict {
 	}
 
 	// Policy decision.
-	var group *classifier.FlowGroup
-	if flow.GroupID != "" {
-		group, _ = svc.Matcher.Get(flow.GroupID)
-	} else {
-		// Response traffic: inherit group status via its flow record only.
-		group = nil
+	var decision policy.Decision
+
+	switch svc.Phase() {
+	case state.PhaseIdle, state.PhaseLearning:
+		// During idle/learning we only record: everything passes except
+		// flows where a flag was already seen.
+		if flow.FlagSeen {
+			decision = policy.Decision{Verdict: nfqueue.Drop, SendRST: true,
+				Reason: "flag detected (learning)"}
+		} else {
+			decision = policy.Decision{Verdict: nfqueue.Accept, Reason: "learning"}
+		}
+	default:
+		var group *classifier.FlowGroup
+		if flow.GroupID != "" {
+			group, _ = svc.Matcher.Get(flow.GroupID)
+		}
+		decision = policy.Evaluate(flow, group)
 	}
-	decision := policy.Evaluate(flow, group)
 
 	// Mirror banned packets (policy guarantees TempBanned/FlagSeen excluded).
 	if decision.Mirror && len(pkt.Data) > 0 && dir == classifier.Inbound {

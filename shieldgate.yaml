@@ -30,7 +30,7 @@ storage:
   pcap_enabled: false
 
 api:
-  listen: ":8080"
+  listen: ":8888"
 
 board:
   type: ""            # forcad | ctfd | faust — set via web UI (Settings tab)
