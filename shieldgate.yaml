@@ -1,0 +1,41 @@
+# ShieldGate configuration.
+#
+# Everything below can also be configured through the web UI (Settings tab) —
+# UI settings are persisted in the SQLite database and survive restarts.
+# This file only provides bootstrap defaults.
+
+general:
+  interface: eth0
+  flow_ttl: 5m
+  max_payload_bytes: 65536
+
+nfqueue:
+  start_num: 100      # queue numbers are assigned sequentially per service port
+  batch_size: 128
+  max_queue_len: 4096
+
+learn:
+  round_duration: 2m  # n; learning window is n*2
+  flag_regex: '[A-Za-z0-9]{31}='
+
+optimize:
+  ban_fraction: 0.25  # share of allowed groups to temp-ban per cycle
+
+mirror:
+  enabled: true
+
+storage:
+  db_path: shieldgate.db
+  pcap_dir: ./pcap
+  pcap_enabled: false
+
+api:
+  listen: ":8080"
+
+board:
+  type: ""            # forcad | ctfd | faust — set via web UI (Settings tab)
+  url: ""
+  token: ""
+  poll_interval: 10s
+  our_ip: ""
+  task_ports: {}      # e.g. { myservice: 8000 } when the board hides ports

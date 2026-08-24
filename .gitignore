@@ -1,0 +1,11 @@
+/bin/
+/shieldgate
+shieldgate-bin
+*.db
+*.db-shm
+*.db-wal
+/pcap/
+web/node_modules/
+web/dist/
+/.env
+/.logs/
