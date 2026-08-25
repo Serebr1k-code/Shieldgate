@@ -25,9 +25,9 @@ type ServerDeps struct {
 	Reconfigure func(SettingsDTO) error
 }
 
-// EngineDebugger exposes pipeline debug counters.
+// EngineDebugger exposes pipeline debug counters as a JSON-serializable map.
 type EngineDebugger interface {
-	Debug() any
+	Debug() map[string]uint64
 }
 
 type Server struct {

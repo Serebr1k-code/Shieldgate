@@ -47,10 +47,13 @@ type DebugCounters struct {
 	NoService  uint64 `json:"no_service"`
 }
 
-func (e *Engine) Debug() DebugCounters {
-	return DebugCounters{
-		e.calls.Load(), e.decodeFail.Load(), e.unrelated.Load(),
-		e.inbound.Load(), e.noService.Load(),
+func (e *Engine) Debug() map[string]uint64 {
+	return map[string]uint64{
+		"calls":       e.calls.Load(),
+		"decode_fail": e.decodeFail.Load(),
+		"unrelated":   e.unrelated.Load(),
+		"inbound":     e.inbound.Load(),
+		"no_service":  e.noService.Load(),
 	}
 }
 
