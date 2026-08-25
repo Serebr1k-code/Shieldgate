@@ -87,28 +87,26 @@ func (e *Engine) Handle(pkt *nfqueue.Packet) nfqueue.Verdict {
 		return nfqueue.Accept // not IP/TCP/UDP: let kernel handle it
 	}
 
-	e.mu.RLock()
-	ourIP := e.ourIP
-	e.mu.RUnlock()
-
-	inbound := ourIP != nil && dstIP.Equal(ourIP)
-	var servicePort uint16
-	dir := classifier.Outbound
-	if inbound {
-		servicePort = dstPort
+	// Direction is derived from the SERVICE PORT, not from IP addresses:
+	// behind Docker/NAT the packet's dst IP is already rewritten, while the
+	// port mapping stays authoritative.
+	var svc *state.Service
+	var dir classifier.Direction
+	if s, ok := e.mgr.ServiceForPort(dstPort); ok {
+		svc = s
 		dir = classifier.Inbound
-	} else if ourIP != nil && srcIP.Equal(ourIP) {
-		servicePort = srcPort
+	} else if s, ok := e.mgr.ServiceForPort(srcPort); ok {
+		svc = s
+		dir = classifier.Outbound
 	} else {
 		e.unrelated.Add(1)
-		return nfqueue.Accept // unrelated traffic
+		return nfqueue.Accept // not traffic of a protected service
 	}
 	e.inbound.Add(1)
 
-	svc, ok := e.mgr.ServiceForPort(servicePort)
-	if !ok {
+	if svc == nil {
 		e.noService.Add(1)
-		return nfqueue.Accept // no protected service on this port
+		return nfqueue.Accept
 	}
 
 	// Track flow & payload.
