@@ -19,9 +19,15 @@ type ServerDeps struct {
 	Flows   *classifier.Manager
 	Hub     *Hub
 	Store   *storage.DB
+	Engine  EngineDebugger
 	// Reconfigure applies new settings at runtime (board reconnect,
 	// nftables rules, mirror targets). Optional.
 	Reconfigure func(SettingsDTO) error
+}
+
+// EngineDebugger exposes pipeline debug counters.
+type EngineDebugger interface {
+	Debug() any
 }
 
 type Server struct {
@@ -49,6 +55,11 @@ func NewServer(deps ServerDeps) *Server {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+	if deps.Engine != nil {
+		r.Get("/debug/counters", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, deps.Engine.Debug())
+		})
+	}
 
 	s.router = r
 	return s

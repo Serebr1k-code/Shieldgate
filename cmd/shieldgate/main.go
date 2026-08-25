@@ -184,6 +184,7 @@ func main() {
 		Flows:       flows,
 		Hub:         hub,
 		Store:       store,
+		Engine:      eng,
 		Reconfigure: applySettings,
 	})
 	httpSrv := &http.Server{

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket"
@@ -28,6 +29,29 @@ type Engine struct {
 	store  *storage.DB
 
 	onEvent func(state.Event)
+
+	// debug counters
+	calls      atomic.Uint64
+	decodeFail atomic.Uint64
+	unrelated  atomic.Uint64
+	inbound    atomic.Uint64
+	noService  atomic.Uint64
+}
+
+// DebugCounters exposes pipeline counters for the debug endpoint.
+type DebugCounters struct {
+	Calls      uint64 `json:"calls"`
+	DecodeFail uint64 `json:"decode_fail"`
+	Unrelated  uint64 `json:"unrelated"`
+	Inbound    uint64 `json:"inbound"`
+	NoService  uint64 `json:"no_service"`
+}
+
+func (e *Engine) Debug() DebugCounters {
+	return DebugCounters{
+		e.calls.Load(), e.decodeFail.Load(), e.unrelated.Load(),
+		e.inbound.Load(), e.noService.Load(),
+	}
 }
 
 func New(ourIP net.IP, mgr *state.Manager, flows *classifier.Manager,
@@ -53,8 +77,10 @@ func (e *Engine) SetOurIP(ip net.IP) {
 // Handle processes one intercepted packet and returns a verdict.
 // Implements nfqueue.PacketHandler.
 func (e *Engine) Handle(pkt *nfqueue.Packet) nfqueue.Verdict {
+	e.calls.Add(1)
 	srcIP, dstIP, srcPort, dstPort, proto, payload, ok := decode(pkt.Data)
 	if !ok {
+		e.decodeFail.Add(1)
 		return nfqueue.Accept // not IP/TCP/UDP: let kernel handle it
 	}
 
@@ -71,11 +97,14 @@ func (e *Engine) Handle(pkt *nfqueue.Packet) nfqueue.Verdict {
 	} else if ourIP != nil && srcIP.Equal(ourIP) {
 		servicePort = srcPort
 	} else {
+		e.unrelated.Add(1)
 		return nfqueue.Accept // unrelated traffic
 	}
+	e.inbound.Add(1)
 
 	svc, ok := e.mgr.ServiceForPort(servicePort)
 	if !ok {
+		e.noService.Add(1)
 		return nfqueue.Accept // no protected service on this port
 	}
 
