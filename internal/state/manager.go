@@ -146,7 +146,13 @@ func (m *Manager) StartPolling(interval time.Duration) {
 func (m *Manager) Stop() { close(m.stop) }
 
 func (m *Manager) pollOnce() {
-	statuses, err := m.client.Poll()
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+	if client == nil {
+		return // no board connected yet (awaiting UI configuration)
+	}
+	statuses, err := client.Poll()
 	if err != nil {
 		log.Printf("board poll error: %v", err)
 		return
