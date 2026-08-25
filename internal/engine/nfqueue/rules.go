@@ -17,7 +17,7 @@ const tableName = "shieldgate"
 //   - input   (services running on the host itself)
 //   - forward (traffic DNAT'ed by Docker into containers)
 type RuleManager struct {
-	conn       *nftables
+	conn       *nftables.Conn
 	queueStart uint16
 	chains     []*nftables.Chain
 	table      *nftables.Table
