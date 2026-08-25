@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -14,10 +15,12 @@ type Manager struct {
 	mu       sync.RWMutex
 	services map[string]*Service
 
-	cfg     *config.Config
-	client  board.BoardClient
-	flags   *FlagDetector
-	checker map[string]CheckerStatus
+	cfg          *config.Config
+	client       board.BoardClient
+	flags        *FlagDetector
+	checker      map[string]CheckerStatus
+	checkDetails map[string]board.CheckResult
+	failureSigs  map[string][]string
 
 	nowFn   func() time.Time
 	stop    chan struct{}
@@ -30,13 +33,15 @@ func NewManager(cfg *config.Config, client board.BoardClient) (*Manager, error) 
 		return nil, err
 	}
 	return &Manager{
-		services: make(map[string]*Service),
-		cfg:      cfg,
-		client:   client,
-		flags:    fd,
-		checker:  make(map[string]CheckerStatus),
-		nowFn:    time.Now,
-		stop:     make(chan struct{}),
+		services:     make(map[string]*Service),
+		cfg:          cfg,
+		client:       client,
+		flags:        fd,
+		checker:      make(map[string]CheckerStatus),
+		checkDetails: make(map[string]board.CheckResult),
+		failureSigs:  make(map[string][]string),
+		nowFn:        time.Now,
+		stop:         make(chan struct{}),
 	}, nil
 }
 
@@ -101,6 +106,33 @@ func (m *Manager) CheckerStatus(serviceID string) CheckerStatus {
 	return m.checker[serviceID]
 }
 
+// rememberFailure keeps the last few distinct failure messages per service
+// as baseline signatures for flakiness detection in the optimizer.
+func (m *Manager) rememberFailure(serviceID, msg string) {
+	if msg == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	list := m.failureSigs[serviceID]
+	for _, existing := range list {
+		if existing == msg {
+			return
+		}
+	}
+	list = append(list, msg)
+	if len(list) > 5 {
+		list = list[len(list)-5:]
+	}
+	m.failureSigs[serviceID] = list
+}
+
+func (m *Manager) recentFailures(serviceID string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]string(nil), m.failureSigs[serviceID]...)
+}
+
 func (m *Manager) setChecker(id string, st CheckerStatus) {
 	m.mu.Lock()
 	prev := m.checker[id]
@@ -152,14 +184,25 @@ func (m *Manager) pollOnce() {
 	if client == nil {
 		return // no board connected yet (awaiting UI configuration)
 	}
-	statuses, err := client.Poll()
+	details, err := board.PollDetailedOf(client)
 	if err != nil {
 		log.Printf("board poll error: %v", err)
 		return
 	}
-	for id, st := range statuses {
-		m.setChecker(id, st)
-		m.broadcast(Event{Type: "checker.update", ServiceID: id, Message: st.String(), At: m.nowFn()})
+	m.mu.Lock()
+	for id, res := range details {
+		m.checker[id] = res.Status
+		m.checkDetails[id] = res
+	}
+	m.mu.Unlock()
+	for id, res := range details {
+		m.setChecker(id, res.Status)
+		msg := res.Status.String()
+		if res.Message != "" && res.Status.Red() {
+			msg += ": " + res.Message
+			m.rememberFailure(id, res.Message)
+		}
+		m.broadcast(Event{Type: "checker.update", ServiceID: id, Message: msg, At: m.nowFn()})
 	}
 
 	m.mu.RLock()
@@ -210,20 +253,55 @@ func (m *Manager) scheduleLearningEnd(s *Service) {
 
 const intervalSlack = time.Second
 
-// runOptimizer loops optimization cycles until stopped or phase changes.
+// runOptimizer drives the configured strategy until its agenda is exhausted
+// or the checker goes red outside a controlled test.
 func (m *Manager) runOptimizer(s *Service) {
 	opt := s.Opt()
 	if opt == nil {
 		return
 	}
 	opt.SyncAllowed(s.Matcher.ForService(s.ID))
-	runner := NewOptimizeRunner(opt, s.ID, s.BanFraction, s.RoundDuration*2,
-		func(id string) CheckerStatus { return m.CheckerStatus(id) },
+
+	strategy := m.cfg.Optimize.Strategy
+	if strategy == "" {
+		strategy = "binary"
+	}
+	runner := NewOptimizeRunner(opt, s.ID,
+		s.RoundDuration*2, m.cfg.Optimize.CheckInterval,
+		func(id string) board.CheckResult {
+			m.mu.RLock()
+			defer m.mu.RUnlock()
+			if res, ok := m.checkDetails[id]; ok {
+				return res
+			}
+			return board.CheckResult{Status: m.checker[id]}
+		},
 		time.Sleep)
 	if !runner.WaitForGreen(3) {
 		return // stay in optimizing phase; next poll retries
 	}
-	res := runner.RunCycle()
-	log.Printf("optimizer cycle for %s: success=%v banned=%v restored=%v",
-		s.ID, res.Success, res.BannedIDs, res.Restored)
+
+	var res CycleResult
+	switch strategy {
+	case "random":
+		runner.SetBanFraction(s.BanFraction)
+		res = runner.RunCycle()
+	default: // binary
+		runner.SetRecentFailures(m.recentFailures(s.ID))
+		res = runner.RunSearch()
+	}
+	log.Printf("optimizer (%s) for %s: banned=%v critical=%v restored=%v fail=%q",
+		strategy, s.ID, res.BannedIDs, res.Critical, res.Restored, res.FailMsg)
+	for _, gid := range res.Critical {
+		m.broadcast(Event{Type: "optimizer.critical", ServiceID: s.ID,
+			Message: fmt.Sprintf("group %s marked critical (%s)", short(gid), res.FailMsg),
+			At:      m.nowFn()})
+	}
+}
+
+func short(id string) string {
+	if len(id) > 10 {
+		return id[:10]
+	}
+	return id
 }

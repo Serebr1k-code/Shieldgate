@@ -281,3 +281,33 @@ func parseIP(s string) net.IP {
 // SetOurIP configures the local team IP used to locate our team in the
 // scoreboard listing.
 func (a *SocketAdapter) SetOurIP(ipStr string) { a.ourIPStr = ipStr }
+
+// PollDetailed returns statuses enriched with ForcAD failure messages.
+func (a *SocketAdapter) PollDetailed() (map[string]board.CheckResult, error) {
+	if err := a.refresh(); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	s := a.snapshot
+	a.mu.Unlock()
+
+	teamID, haveTeam := a.ourTeamID(s)
+	msgByTask := map[int]string{}
+	statusByTask := map[int]int{}
+	for _, tt := range s.State.TeamTasks {
+		if !haveTeam || tt.TeamID == teamID {
+			statusByTask[tt.TaskID] = tt.Status
+			msgByTask[tt.TaskID] = tt.Message
+		}
+	}
+	out := make(map[string]board.CheckResult)
+	for _, t := range s.Tasks {
+		out["forcad_"+t.Name] = board.CheckResult{
+			Status:  codeToStatus(statusByTask[t.ID]),
+			Message: msgByTask[t.ID],
+		}
+	}
+	return out, nil
+}
+
+var _ board.DetailedPoller = (*SocketAdapter)(nil)

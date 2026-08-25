@@ -19,7 +19,9 @@ learn:
   flag_regex: '[A-Za-z0-9]{31}='
 
 optimize:
-  ban_fraction: 0.25  # share of allowed groups to temp-ban per cycle
+  strategy: binary    # binary | random
+  ban_fraction: 0.25  # only for strategy: random
+  check_interval: 5s  # checker polling inside a test window (fail-fast)
 
 mirror:
   enabled: true

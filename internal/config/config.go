@@ -38,8 +38,11 @@ type Learn struct {
 }
 
 type Optimize struct {
-	BanFraction float64       `mapstructure:"ban_fraction"`
-	CycleWait   time.Duration `mapstructure:"cycle_wait"` // n*2 normally; overridable for tests
+	BanFraction float64 `mapstructure:"ban_fraction"`
+	// Strategy: "binary" (default) — agenda-based binary splitting;
+	// "random" — legacy weighted-random 1/4 temp-bans.
+	Strategy      string        `mapstructure:"strategy"`
+	CheckInterval time.Duration `mapstructure:"check_interval"` // intra-window polling
 }
 
 type Mirror struct {
@@ -72,7 +75,7 @@ func Defaults() *Config {
 		General:  General{Interface: "eth0", FlowTTL: 5 * time.Minute, MaxPayload: 64 * 1024},
 		NFQueue:  NFQueue{StartNum: 100, BatchSize: 128, MaxQueueLen: 4096},
 		Learn:    Learn{RoundDuration: 2 * time.Minute, FlagRegex: `[A-Za-z0-9]{31}=`},
-		Optimize: Optimize{BanFraction: 0.25},
+		Optimize: Optimize{BanFraction: 0.25, Strategy: "binary", CheckInterval: 5 * time.Second},
 		Mirror:   Mirror{Enabled: true},
 		Storage:  Storage{DBPath: "shieldgate.db", PcapDir: "./pcap", PcapEnabled: false},
 		API:      API{Listen: ":8080"},
@@ -105,6 +108,14 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.Optimize.BanFraction <= 0 || c.Optimize.BanFraction >= 1 {
 		return fmt.Errorf("optimize.ban_fraction must be in (0,1), got %v", c.Optimize.BanFraction)
+	}
+	switch c.Optimize.Strategy {
+	case "", "binary", "random":
+	default:
+		return fmt.Errorf("optimize.strategy must be binary|random, got %q", c.Optimize.Strategy)
+	}
+	if c.Optimize.CheckInterval <= 0 {
+		c.Optimize.CheckInterval = 5 * time.Second
 	}
 	if c.Learn.RoundDuration <= 0 {
 		return fmt.Errorf("learn.round_duration must be > 0")

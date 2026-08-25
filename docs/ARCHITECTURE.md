@@ -59,15 +59,31 @@ KERNEL                          USER SPACE (Go)
 | Group Allowed            | ACCEPT  |     |          |
 | Unknown / no group       | DROP    | ✗   | ✗        |
 
-## Optimization cycle
+## Optimization
 
-1. Wait for green checker.
-2. Weighted random selection (Efraimidis–Spirakis over group weights) of
-   `floor(len * ban_fraction)` allowed groups → TempBanned.
-3. Sleep `n×2`.
-4. Green ⇒ promote to Banned, reset all weights to base.
-   Red ⇒ restore to Allowed, `weight -= 0.25*weight` (min 0.1), sleep another
-   `n×2` before next cycle.
+Default strategy `optimize.strategy: binary` — agenda-based binary splitting:
+
+1. Agenda starts with the full Allowed set of a service.
+2. Take a chunk, split into halves (smaller half tested first with 70%
+   probability), temp-ban one half for the test window (n×2).
+3. The checker is polled every `check_interval` (5s): a confirmed failure
+   (2 consecutive red samples not matching baseline flakiness signatures)
+   aborts the window immediately.
+4. Green whole window ⇒ the chunk is proven safe → permanent Ban;
+   the other half stays on the agenda.
+   Red ⇒ restore chunk, push its halves back (recursion).
+5. Single-group chunks that fail are marked **critical** (`IsChecker=true`,
+   failure message stored): their traffic stays Allowed forever and they
+   never re-enter the search.
+
+Convergence: O(log N) windows per critical group; services search in
+parallel since each has its own checker. ForcAD failure messages
+("Could not get flag", "Checker timed out", ...) are compared against a
+pre-window baseline so background flakiness does not derail the search.
+
+Legacy `strategy: random` keeps the old behaviour: weighted random selection
+(Efraimidis–Spirakis) of `floor(len * ban_fraction)` groups per n×2 cycle,
+−25% weight penalty on failure.
 
 ## Performance notes
 

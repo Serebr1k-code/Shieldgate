@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"shieldgate/internal/board"
 	"shieldgate/internal/engine/classifier"
 )
 
@@ -65,14 +66,15 @@ func TestOptimizerSuccessScenario(t *testing.T) {
 
 	checkerGreen := true
 	waits := 0
-	r := NewOptimizeRunner(st, s.ID, 0.25, 10*time.Second,
-		func(string) CheckerStatus {
+	r := NewOptimizeRunner(st, s.ID, 10*time.Second, time.Second,
+		func(string) board.CheckResult {
 			if checkerGreen {
-				return CheckerGreen
+				return green("")
 			}
-			return CheckerRed
+			return red("boom")
 		},
 		func(d time.Duration) { waits++; now = now.Add(d) })
+	r.SetBanFraction(0.25)
 
 	res := r.RunCycle()
 	require.True(t, res.Success)
@@ -99,15 +101,16 @@ func TestOptimizerFailureScenario(t *testing.T) {
 	st.SyncAllowed(groups)
 
 	cycle := 0
-	r := NewOptimizeRunner(st, s.ID, 0.25, 10*time.Second,
-		func(string) CheckerStatus {
+	r := NewOptimizeRunner(st, s.ID, 10*time.Second, time.Second,
+		func(string) board.CheckResult {
 			cycle++
 			if cycle == 1 { // green at selection, red after wait
-				return CheckerGreen
+				return green("")
 			}
-			return CheckerRed
+			return red("boom")
 		},
 		func(d time.Duration) { now = now.Add(d) })
+	r.SetBanFraction(0.25)
 
 	res := r.RunCycle()
 	require.False(t, res.Success)
@@ -135,9 +138,10 @@ func TestOptimizerCheckerMarkedExcluded(t *testing.T) {
 	st := NewOptimizerState(now, func() time.Time { return now })
 	st.SyncAllowed(groups)
 
-	r := NewOptimizeRunner(st, s.ID, 0.25, time.Second,
-		func(string) CheckerStatus { return CheckerGreen },
+	r := NewOptimizeRunner(st, s.ID, time.Second, time.Second,
+		func(string) board.CheckResult { return green("") },
 		func(time.Duration) {})
+	r.SetBanFraction(0.25)
 	res := r.RunCycle()
 	assert.True(t, res.Success)
 	assert.Empty(t, res.BannedIDs)
