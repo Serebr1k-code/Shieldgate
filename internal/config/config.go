@@ -109,10 +109,14 @@ func (c *Config) Validate() error {
 	if c.Learn.RoundDuration <= 0 {
 		return fmt.Errorf("learn.round_duration must be > 0")
 	}
-	switch c.Board.Type {
-	case "forcad", "ctfd", "faust":
-	default:
-		return fmt.Errorf("board.type must be one of forcad|ctfd|faust, got %q", c.Board.Type)
+	// Board settings may be empty: they are configured at runtime through
+	// the web UI and persisted in the database.
+	if c.Board.Type != "" {
+		switch c.Board.Type {
+		case "forcad", "ctfd", "faust":
+		default:
+			return fmt.Errorf("board.type must be one of forcad|ctfd|faust, got %q", c.Board.Type)
+		}
 	}
 	if c.General.MaxPayload <= 0 {
 		return fmt.Errorf("general.max_payload_bytes must be > 0")
